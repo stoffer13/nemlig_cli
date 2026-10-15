@@ -27,6 +27,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import argcomplete
@@ -655,6 +656,68 @@ def wrap_text(text: str, width: int = 80, indent: str = "  ") -> list[str]:
     return lines
 
 
+MULTI_BUY_CAMPAIGNS = {"ProductCampaignBuyXForY": "OFFER", "ProductCampaignMixOffer": "MIX OFFER"}
+
+
+def campaign_summary(campaign: dict | None, price: float) -> str:
+    """Describe an active campaign in one line, or "" if there is none worth showing.
+
+    `price` is the regular price of one item. Savings are computed from it rather
+    than from the API's DiscountSavings, which is unreliable (wrong sign/magnitude).
+    Campaigns that don't beat the current price are suppressed — the API lists some
+    whose CampaignPrice is above Price.
+    """
+    if not campaign:
+        return ""
+
+    until = ""
+    end = campaign.get("IntervalEnd")
+    if end:
+        try:
+            until = f", until {datetime.fromisoformat(end.replace('Z', '+00:00')).astimezone():%Y-%m-%d}"
+        except ValueError:
+            pass
+
+    ctype = campaign.get("Type", "")
+    min_qty = campaign.get("MinQuantity") or 0
+    if ctype in MULTI_BUY_CAMPAIGNS and min_qty > 1:
+        total = campaign.get("TotalPrice") or campaign.get("CampaignPrice") or 0
+        regular = min_qty * price
+        if not total or not regular or total >= regular:
+            return ""
+        pct = (1 - total / regular) * 100
+        return f"{MULTI_BUY_CAMPAIGNS[ctype]}: {min_qty} for {total:.2f} kr ({total / min_qty:.2f} kr each, -{pct:.0f}%){until}"
+
+    sale_price = campaign.get("CampaignPrice") or 0
+    if not sale_price or sale_price > price:
+        return ""
+    if sale_price == price:  # basket lines may already carry the sale price
+        return f"SALE: {sale_price:.2f} kr{until}"
+    pct = (1 - sale_price / price) * 100
+    return f"SALE: {sale_price:.2f} kr (was {price:.2f}, -{pct:.0f}%){until}"
+
+
+def product_tags(product: dict) -> str:
+    """Bracketed campaign/discount tags for one-line product output ("" if none)."""
+    tags = []
+    offer = campaign_summary(product.get("Campaign"), product.get("ItemPrice") or product.get("Price") or 0)
+    if offer:
+        tags.append(f"[{offer}]")
+    # nemlig's permanent low-price "Discount" range — not a time-limited sale
+    if product.get("DiscountItem"):
+        tags.append("[Discount range]")
+    return " ".join(tags)
+
+
+def product_labels(product: dict) -> str:
+    """Product labels (Øko, origin, welfare marks…) as "{a, b}", or "" if none.
+
+    "Discount" is dropped — product_tags() already reports it as [Discount range].
+    """
+    labels = [lbl for lbl in product.get("Labels") or [] if lbl != "Discount"]
+    return "{" + ", ".join(labels) + "}" if labels else ""
+
+
 def format_product(product: dict) -> str:
     """Format a product for display."""
     price = product.get("Price", 0)
@@ -668,6 +731,9 @@ def format_product(product: dict) -> str:
     availability_str = "In stock" if available else "OUT OF STOCK"
 
     line = f"  [{product_id}] {name} ({brand}) - {price:.2f} kr - {description} [{availability_str}]"
+    for extra in (product_labels(product), product_tags(product)):
+        if extra:
+            line += f" {extra}"
     if image_url:
         line += f"\n    Image: {image_url}"
     return line
@@ -682,7 +748,9 @@ def format_basket_line(line: dict) -> str:
     total_price = line.get("Price", 0)
     product_id = line.get("Id", "")
 
-    return f"  [{product_id}] {name} ({brand}) x{quantity} @ {item_price:.2f} kr = {total_price:.2f} kr"
+    tags = product_tags(line)
+    tags = f" {tags}" if tags else ""
+    return f"  [{product_id}] {name} ({brand}) x{quantity} @ {item_price:.2f} kr = {total_price:.2f} kr{tags}"
 
 
 def format_order_summary(order: dict) -> str:
@@ -788,12 +856,11 @@ def format_product_details(product: dict) -> str:
     lines.append(f"Price:       {price:.2f} kr ({unit_price:.2f} {unit_label})")
 
     # Campaign info
-    campaign = product.get("Campaign")
-    if campaign:
-        campaign_type = campaign.get("Type", "")
-        min_qty = campaign.get("MinQuantity", 0)
-        campaign_price = campaign.get("TotalPrice", 0)
-        lines.append(f"Campaign:    {min_qty} for {campaign_price:.2f} kr ({campaign_type})")
+    offer = campaign_summary(product.get("Campaign"), price)
+    if offer:
+        lines.append(f"Campaign:    {offer}")
+    if product.get("DiscountItem"):
+        lines.append("Discount:    part of nemlig's low-price Discount range")
 
     # Availability
     availability = product.get("Availability", {})
@@ -811,8 +878,11 @@ def format_product_details(product: dict) -> str:
         lines.append("")
         lines.append("Attributes:")
         for attr in attributes:
-            attr_name = attr.get("Name", "")
+            # Live API returns {"Key": str, "Value": [str]}; older docs showed {"Name", "Value": str}
+            attr_name = attr.get("Key") or attr.get("Name", "")
             attr_value = attr.get("Value", "")
+            if isinstance(attr_value, list):
+                attr_value = ", ".join(str(v) for v in attr_value)
             lines.append(f"  {attr_name}: {attr_value}")
 
     # Labels
@@ -876,6 +946,9 @@ def cmd_basket(auth: AuthTokens, args: argparse.Namespace) -> int:
         print(format_basket_line(line))
         total += line.get("Price", 0)
 
+    discount = basket.get("TotalProductDiscountPrice") or 0
+    if discount:
+        print(f"\n  Campaign savings: {discount:.2f} kr")
     print(f"\n  Total: {total:.2f} kr")
 
     return 0

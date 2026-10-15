@@ -85,7 +85,7 @@ rm diagram.drawio  # Keep only the .svg
 ```
 
 Current diagrams:
-- `arch_api.drawio.svg` - API architecture (endpoints, auth flow)
+- `arch_api.drawio.svg` - Client layers (MCP server, CLI, client) + API architecture (endpoints, auth flow)
 - `mcp-workflow.drawio.svg` - MCP workflow for API discovery
 
 ## Project Commands

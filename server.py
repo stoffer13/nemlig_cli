@@ -147,7 +147,8 @@ def _fmt_product(p: dict) -> str:
         unit = f" ({p['UnitPriceCalc']:.2f} {p.get('UnitPriceLabel', '')})".rstrip()
     stock = "in stock" if p.get("Availability", {}).get("IsAvailableInStock") else "OUT OF STOCK"
     desc = f" — {p['Description']}" if p.get("Description") else ""
-    return f"[{p.get('Id')}] {p.get('Name')}{brand} — {p.get('Price', 0):.2f} kr{unit}{desc} [{stock}]"
+    extras = "".join(f" {x}" for x in (nemlig_cli.product_labels(p), nemlig_cli.product_tags(p)) if x)
+    return f"[{p.get('Id')}] {p.get('Name')}{brand} — {p.get('Price', 0):.2f} kr{unit}{desc} [{stock}]{extras}"
 
 
 def _fmt_basket_line(ln: dict) -> str:
@@ -155,6 +156,7 @@ def _fmt_basket_line(ln: dict) -> str:
     return (
         f"[{ln.get('Id')}] {ln.get('Name')}{brand} "
         f"x{ln.get('Quantity', 0)} @ {ln.get('ItemPrice', 0):.2f} kr = {ln.get('Price', 0):.2f} kr"
+        + (f" {tags}" if (tags := nemlig_cli.product_tags(ln)) else "")
     )
 
 
@@ -165,6 +167,8 @@ def _fmt_basket(basket: dict) -> str:
     out = [f"Basket ({len(lines)} lines):"]
     out += [_fmt_basket_line(ln) for ln in lines]
     total = sum(ln.get("Price", 0) for ln in lines)
+    if discount := basket.get("TotalProductDiscountPrice"):
+        out.append(f"Campaign savings: {discount:.2f} kr")
     out.append(f"Total: {total:.2f} kr")
     return "\n".join(out)
 
@@ -178,7 +182,12 @@ mcp = FastMCP("nemlig")
 @_safe
 def search_products(query: str, limit: int = 10) -> str:
     """Search nemlig.com for products. Returns one line per product:
-    [product_id] name (brand) — price (unit price) — description [stock status]."""
+    [product_id] name (brand) — price (unit price) — description [stock status],
+    then optional {labels} (e.g. Øko (dansk), Produceret i Danmark, welfare marks),
+    then optional tags: [SALE: ...] / [OFFER: N for X kr ...] / [MIX OFFER: ...]
+    (mix offers combine across products in the same campaign), each with savings
+    vs. the regular price and the end date; [Discount range] marks nemlig's
+    permanent low-price range, not a time-limited sale."""
     products = _call(nemlig_cli.search_products, query, limit=limit)
     if not products:
         return f"No products found for '{query}'."
@@ -189,7 +198,7 @@ def search_products(query: str, limit: int = 10) -> str:
 @_safe
 def get_product_details(product_id: str) -> str:
     """Get detailed information for a nemlig.com product by its product ID
-    (description, price, unit price, contents, nutrition, availability)."""
+    (description, price, unit price, campaign/offer, contents, nutrition, availability)."""
     product = _call(nemlig_cli.get_product_details, product_id)
     return nemlig_cli.format_product_details(product)
 
@@ -198,7 +207,8 @@ def get_product_details(product_id: str) -> str:
 @_safe
 def view_basket() -> str:
     """View the current nemlig.com basket: one line per item with product ID,
-    name, quantity, unit price and line total, plus the basket total."""
+    name, quantity, unit price, line total and any campaign tag, plus campaign
+    savings and the basket total."""
     return _fmt_basket(_call(nemlig_cli.get_basket))
 
 

@@ -751,6 +751,33 @@ Same as Add to Basket.
 | `DiscountSavings` | number | Amount saved from discount |
 | `Campaign` | object | Campaign/offer details if applicable |
 | `Labels` | array | Product labels (e.g., "Øko", "Vegansk") |
+
+#### Campaign Object
+
+The same `Campaign` object appears on search results, product details and basket
+lines (`null` when there is no campaign). Observed `Type` values:
+
+| `Type` | Meaning | Key fields |
+|--------|---------|------------|
+| `ProductCampaignBuyXForY` | Buy `MinQuantity` of this product for `TotalPrice` | `MinQuantity`, `TotalPrice` |
+| `ProductCampaignMixOffer` | Buy `MinQuantity` mixed across the campaign's products for `TotalPrice` | `MinQuantity`, `TotalPrice` |
+| `ProductCampaignDiscount` | Single-item sale price | `CampaignPrice`, `CampaignUnitPrice` |
+| `ProductCampaignDiscountPercent` | Single-item percentage sale | `DiscountPercent`, `CampaignPrice`, `CampaignUnitPrice` |
+
+All types carry `IntervalStart` / `IntervalEnd` (UTC) and a `Code`.
+
+**Caveats (observed in live data):**
+
+- `DiscountSavings` is unreliable — sometimes negative or off by an order of
+  magnitude. Compute savings from `Price` instead (`MinQuantity × Price − TotalPrice`,
+  or `Price − CampaignPrice`).
+- Some `ProductCampaignDiscount` entries have `CampaignPrice` **above** the current
+  `Price` (the product is already cheaper). These are not real deals.
+- `DiscountItem: true` (plus a `"Discount"` entry in `Labels`) marks nemlig's
+  permanent low-price Discount range. It is independent of `Campaign` and is not a
+  time-limited sale.
+- The basket response has `TotalProductDiscountPrice` (total campaign savings) and
+  `CouponDiscount`.
 | `ProductAddedTimestamp` | number | When item was added to basket |
 
 #### Cookies Set
@@ -1432,11 +1459,11 @@ The response follows the standard GetAsJson structure with product-specific cont
         "Code": "FM"
       },
       "Attributes": [
-        {"Name": "Smag", "Value": "Classic"},
-        {"Name": "Allergener", "Value": "Mælk"},
-        {"Name": "Mærkninger", "Value": "Produceret i Danmark"},
-        {"Name": "Brand", "Value": "Cocio"},
-        {"Name": "Type", "Value": "Kakaomælk"}
+        {"Key": "Smag", "Value": ["Classic"]},
+        {"Key": "Allergener", "Value": ["Mælk"]},
+        {"Key": "Mærkninger", "Value": ["Produceret i Danmark"]},
+        {"Key": "Brand", "Value": ["Cocio"]},
+        {"Key": "Type", "Value": ["Kakaomælk"]}
       ],
       "Media": [
         {
@@ -1475,7 +1502,7 @@ The response follows the standard GetAsJson structure with product-specific cont
 | `Price` | number | Current price |
 | `UnitPriceCalc` | number | Price per unit |
 | `UnitPriceLabel` | string | Unit label (kr./l., kr./kg., etc.) |
-| `Attributes` | array | Key-value product attributes |
+| `Attributes` | array | Product attributes: `{"Key": str, "Value": [str]}` |
 | `Media` | array | Product images and videos |
 | `DeclarationLabel` | string | HTML nutritional label |
 | `Declarations` | object | Structured nutritional data |
