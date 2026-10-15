@@ -10,13 +10,15 @@ Usage:
     python nemlig_cli.py add PRODUCT_ID [--quantity N]
     python nemlig_cli.py history [ORDER_ID]
 
-Credentials can be provided via ~/.config/nemlig/login.json or CLI options.
-CLI options override the config file.
+Credentials are read from the NEMLIG_USER / NEMLIG_PASS environment variables,
+falling back to ~/.config/nemlig/login.json. -u/-p override both, but -p puts
+the password on the command line where other local users can see it in `ps`.
 """
 
 import argparse
 import itertools
 import json
+import os
 import re
 import sys
 import threading
@@ -138,6 +140,12 @@ def load_config_credentials() -> dict:
     if not CONFIG_FILE.exists():
         return {}
 
+    if CONFIG_FILE.stat().st_mode & 0o077:
+        print(
+            f"Warning: {CONFIG_FILE} is readable by other users; run: chmod 600 {CONFIG_FILE}",
+            file=sys.stderr,
+        )
+
     with open(CONFIG_FILE, encoding="utf-8") as f:
         data = json.load(f)
 
@@ -180,6 +188,17 @@ ORDER_STATUS_MAP = {
 # Maximum orders to scan when looking up by ID
 MAX_ORDER_HISTORY_LOOKUP = 100
 
+# (connect, read) seconds applied to every request unless the caller passes one
+REQUEST_TIMEOUT = (5, 20)
+
+
+class _TimeoutSession(requests.Session):
+    """requests.Session with a default timeout, so a stalled connection can't hang forever."""
+
+    def request(self, *args, **kwargs):
+        kwargs.setdefault("timeout", REQUEST_TIMEOUT)
+        return super().request(*args, **kwargs)
+
 
 def get_common_headers() -> dict:
     """Return common headers used for all API requests."""
@@ -202,7 +221,7 @@ def login(username: str, password: str) -> AuthTokens:
     2. Get Bearer token
     3. Login with credentials
     """
-    session = requests.Session()
+    session = _TimeoutSession()
     headers = get_common_headers()
 
     spinner = Spinner("Connecting to nemlig.com")
@@ -922,12 +941,11 @@ def main():
         description=LOGO.format(version=VERSION),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Credentials:
-  Credentials are loaded from ~/.config/nemlig/login.json if it exists.
-  CLI options (-u, -p) override the config file values.
-
-  Config file format:
-    {"username": "email@example.com", "password": "secret"}
+Credentials (first match wins):
+  1. -u / -p options (avoid -p: the password is visible in `ps`)
+  2. NEMLIG_USER / NEMLIG_PASS environment variables
+  3. ~/.config/nemlig/login.json (chmod 600):
+       {"username": "email@example.com", "password": "secret"}
 
 Examples:
   %(prog)s search "cocio"
@@ -939,8 +957,8 @@ Examples:
     )
 
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {VERSION}")
-    parser.add_argument("-u", "--username", help="Nemlig.com email/username (overrides config file)")
-    parser.add_argument("-p", "--password", help="Nemlig.com password (overrides config file)")
+    parser.add_argument("-u", "--username", help="Nemlig.com email/username (overrides NEMLIG_USER and config file)")
+    parser.add_argument("-p", "--password", help="Nemlig.com password; prefer NEMLIG_PASS, as -p is visible in `ps`")
 
     subparsers = parser.add_subparsers(dest="command", required=False)
 
@@ -973,15 +991,15 @@ Examples:
         parser.print_help()
         return 1
 
-    # Load credentials: config file first, CLI overrides
+    # Load credentials: CLI options, then environment, then config file
     try:
         config_creds = load_config_credentials()
     except (json.JSONDecodeError, ValueError, OSError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    username = args.username or config_creds.get("username")
-    password = args.password or config_creds.get("password")
+    username = args.username or os.environ.get("NEMLIG_USER") or config_creds.get("username")
+    password = args.password or os.environ.get("NEMLIG_PASS") or config_creds.get("password")
 
     if not username or not password:
         missing = []
@@ -999,7 +1017,7 @@ Examples:
 
         print(
             f"Error: Missing {' and '.join(missing)}. {hint} "
-            f"Provide via config file or -u/-p options.",
+            f"Set NEMLIG_USER/NEMLIG_PASS, use the config file, or pass -u/-p.",
             file=sys.stderr,
         )
         return 1
@@ -1027,9 +1045,9 @@ Examples:
             return 1
 
     except requests.exceptions.HTTPError as e:
-        print(f"HTTP Error: {e}", file=sys.stderr)
-        if e.response is not None:
-            print(f"Response: {e.response.text}", file=sys.stderr)
+        status = e.response.status_code if e.response is not None else "?"
+        url = e.request.url if e.request is not None else "?"
+        print(f"HTTP Error: {status} for {url}", file=sys.stderr)
         return 1
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)

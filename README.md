@@ -38,6 +38,8 @@ export NEMLIG_USER="your@email.com"
 export NEMLIG_PASS="yourpassword"
 ```
 
+The CLI reads these variables directly (or `~/.config/nemlig/login.json`, which should be `chmod 600`). `-u`/`-p` still work but put the password on the command line, where other local users can see it in `ps`. All HTTP requests use a 5 s connect / 20 s read timeout.
+
 ## Usage
 
 All commands are available via the justfile:
@@ -54,7 +56,7 @@ just history 12345678            # Order details
 Direct execution:
 
 ```bash
-uv run python nemlig_cli.py -u "$NEMLIG_USER" -p "$NEMLIG_PASS" search "milk"
+uv run python nemlig_cli.py search "milk"   # reads NEMLIG_USER / NEMLIG_PASS
 ```
 
 ## MCP server
