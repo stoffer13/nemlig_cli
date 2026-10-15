@@ -100,5 +100,9 @@ Custom slash commands for this project. **Run both in sub-agents in parallel bef
 
 ## Fork
 
-Fork of `eisbaw/nemlig_cli` (`upstream` remote). Keep fork-specific additions
-(`server.py`, the extra endpoints) easy to rebase: additive, and grouped where possible.
+Fork of `eisbaw/nemlig_cli`. The fork has **diverged on purpose**: upstream's
+non-nemlig features (AI meal planner, Google Sheets import, fridge/barcode scanner,
+local grocery list + budget, interactive REPL) were removed. Don't reintroduce them
+when merging upstream — resolve those conflicts by keeping the deletion. No `upstream`
+remote is configured locally; add one with
+`git remote add upstream https://github.com/eisbaw/nemlig_cli.git` if needed.

@@ -4,6 +4,8 @@ Command-line interface **and MCP server** for [nemlig.com](https://www.nemlig.co
 
 Fork of [eisbaw/nemlig_cli](https://github.com/eisbaw/nemlig_cli), adding the MCP server and several API endpoints (see [Additions in this fork](#additions-in-this-fork)).
 
+This fork deliberately drops upstream's non-nemlig features (AI meal planner, Google Sheets import, fridge/barcode scanner, local grocery list with budget, interactive REPL) to keep the code focused on the nemlig.com integration.
+
 ## Features
 
 - Product search and details
@@ -34,23 +36,6 @@ The new endpoints are library + MCP only — they have no `argparse` subcommand 
 # Set credentials as environment variables
 export NEMLIG_USER="your@email.com"
 export NEMLIG_PASS="yourpassword"
-```
-
-### Optional features
-
-Search, basket, shopping lists, delivery slots, order history and the MCP server
-need nothing beyond the core dependencies (`requests`, `fastmcp`). The remaining
-features pull in heavier dependencies and are installed as extras:
-
-| Extra | Enables | Commands |
-|-------|---------|----------|
-| `ai` | AI meal planning | `plan` |
-| `sheets` | Google Forms/Sheets recipe import | `import` |
-| `scanner` | Barcode and produce scanning | `scan`, `fridge` |
-| `all` | Everything above | |
-
-```bash
-uv sync --extra all          # or: --extra ai --extra scanner
 ```
 
 ## Usage
