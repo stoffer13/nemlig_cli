@@ -2,15 +2,14 @@
 """
 MCP server wrapping nemlig_cli — search, basket and order history for nemlig.com.
 
-Credentials come from the NEMLIG_USER / NEMLIG_PASS environment variables
-(see run_server.sh, which pulls the password from the macOS Keychain).
+Credentials come from the NEMLIG_USER / NEMLIG_PASS environment variables,
+falling back to the macOS Keychain item with service "nemlig" (account = email).
 They are never logged or echoed.
 
-Run: uv run python server.py  (stdio transport)
+Run: nemlig-mcp  (after `uv tool install`), or uv run python server.py  (stdio transport)
 """
 
 import functools
-import os
 import threading
 import time
 
@@ -85,12 +84,11 @@ def _get_auth(force: bool = False) -> AuthTokens:
     global _auth, _auth_at
     with _auth_lock:
         if force or _auth is None or time.monotonic() - _auth_at > _TOKEN_MAX_AGE:
-            username = os.environ.get("NEMLIG_USER")
-            password = os.environ.get("NEMLIG_PASS")
+            username, password = nemlig_cli.resolve_credentials()
             if not username or not password:
                 raise RuntimeError(
-                    "NEMLIG_USER and NEMLIG_PASS environment variables must be set "
-                    "(run_server.sh pulls the password from the macOS Keychain)."
+                    "No nemlig credentials: set NEMLIG_USER and NEMLIG_PASS, or add a "
+                    "macOS Keychain item: security add-generic-password -s nemlig -a <email> -w"
                 )
             _auth = nemlig_cli.login(username, password)
             _auth_at = time.monotonic()
@@ -355,5 +353,9 @@ def order_history(limit: int = 10, order_id: int | None = None) -> str:
     return "\n".join(out)
 
 
-if __name__ == "__main__":
+def main():
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

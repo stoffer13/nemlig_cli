@@ -764,7 +764,7 @@ wheels = [
 [[package]]
 name = "nemlig-cli"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "argcomplete" },
     { name = "fastmcp" },

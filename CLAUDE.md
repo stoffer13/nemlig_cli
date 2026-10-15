@@ -48,9 +48,13 @@ Conventions to preserve when editing `server.py`:
 - **Return compact structured text, never raw JSON** — IDs in brackets, prices in kr.
   Tool output lands in a context window.
 
-Credentials come from `NEMLIG_USER` / `NEMLIG_PASS`. `run_server.sh` (gitignored,
-machine-specific) pulls the password from the macOS Keychain (service `nemlig`) and
-execs the server. Never log or echo either value.
+Credentials: `nemlig_cli.resolve_credentials()` — `NEMLIG_USER` / `NEMLIG_PASS`, then the
+macOS Keychain item with service `nemlig` (account = email). Both the CLI and `server.py`
+use it. Never log or echo either value.
+
+Installed globally with `uv tool install --editable .` → `nemlig` and `nemlig-mcp` on PATH.
+Consuming projects register the server per folder (`claude mcp add nemlig --scope project
+-- nemlig-mcp`); the build config is hatchling with `only-include` of the two modules.
 
 ## Chrome DevTools MCP (API discovery)
 

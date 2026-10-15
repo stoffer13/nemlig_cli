@@ -11,8 +11,9 @@ Usage:
     python nemlig_cli.py history [ORDER_ID]
 
 Credentials are read from the NEMLIG_USER / NEMLIG_PASS environment variables,
-falling back to ~/.config/nemlig/login.json. -u/-p override both, but -p puts
-the password on the command line where other local users can see it in `ps`.
+then the macOS Keychain (service "nemlig"), then ~/.config/nemlig/login.json.
+-u/-p override all of them, but -p puts the password on the command line where
+other local users can see it in `ps`.
 """
 
 import argparse
@@ -20,6 +21,7 @@ import itertools
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -158,6 +160,48 @@ def load_config_credentials() -> dict:
         "username": data.get("username"),
         "password": data.get("password"),
     }
+
+
+KEYCHAIN_SERVICE = "nemlig"
+
+
+def load_keychain_credentials() -> dict:
+    """
+    Load credentials from the macOS Keychain generic password with service "nemlig".
+
+    The item's account is the username. Create it with:
+        security add-generic-password -s nemlig -a email@example.com -w
+
+    Returns dict with 'username' and 'password' keys, or empty dict if unavailable.
+    """
+    if sys.platform != "darwin":
+        return {}
+    cmd = ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE]
+    try:
+        meta = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if meta.returncode != 0:
+            return {}
+        secret = subprocess.run(cmd + ["-w"], capture_output=True, text=True, timeout=30)
+        if secret.returncode != 0:
+            return {}
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    account = re.search(r'"acct"<blob>="([^"]*)"', meta.stdout)
+    return {
+        "username": account.group(1) if account else None,
+        "password": secret.stdout.rstrip("\n") or None,
+    }
+
+
+def resolve_credentials(username: str | None = None, password: str | None = None) -> tuple[str | None, str | None]:
+    """Fill missing credentials from NEMLIG_USER / NEMLIG_PASS, then the macOS Keychain."""
+    username = username or os.environ.get("NEMLIG_USER")
+    password = password or os.environ.get("NEMLIG_PASS")
+    if not (username and password):
+        keychain = load_keychain_credentials()
+        username = username or keychain.get("username")
+        password = password or keychain.get("password")
+    return username, password
 
 
 BASE_URL = "https://www.nemlig.com"
@@ -944,7 +988,9 @@ def main():
 Credentials (first match wins):
   1. -u / -p options (avoid -p: the password is visible in `ps`)
   2. NEMLIG_USER / NEMLIG_PASS environment variables
-  3. ~/.config/nemlig/login.json (chmod 600):
+  3. macOS Keychain, service "nemlig":
+       security add-generic-password -s nemlig -a email@example.com -w
+  4. ~/.config/nemlig/login.json (chmod 600):
        {"username": "email@example.com", "password": "secret"}
 
 Examples:
@@ -991,15 +1037,16 @@ Examples:
         parser.print_help()
         return 1
 
-    # Load credentials: CLI options, then environment, then config file
+    # Load credentials: CLI options, then environment, then Keychain, then config file
     try:
         config_creds = load_config_credentials()
     except (json.JSONDecodeError, ValueError, OSError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    username = args.username or os.environ.get("NEMLIG_USER") or config_creds.get("username")
-    password = args.password or os.environ.get("NEMLIG_PASS") or config_creds.get("password")
+    username, password = resolve_credentials(args.username, args.password)
+    username = username or config_creds.get("username")
+    password = password or config_creds.get("password")
 
     if not username or not password:
         missing = []
@@ -1017,7 +1064,8 @@ Examples:
 
         print(
             f"Error: Missing {' and '.join(missing)}. {hint} "
-            f"Set NEMLIG_USER/NEMLIG_PASS, use the config file, or pass -u/-p.",
+            f"Set NEMLIG_USER/NEMLIG_PASS, add a Keychain item (service 'nemlig'), "
+            f"use the config file, or pass -u/-p.",
             file=sys.stderr,
         )
         return 1

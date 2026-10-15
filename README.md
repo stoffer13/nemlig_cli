@@ -32,13 +32,28 @@ The new endpoints are library + MCP only — they have no `argparse` subcommand 
 - [uv](https://github.com/astral-sh/uv) package manager
 - Credentials for nemlig.com account
 
+### Install
+
 ```bash
-# Set credentials as environment variables
-export NEMLIG_USER="your@email.com"
-export NEMLIG_PASS="yourpassword"
+cd /path/to/nemlig_cli
+uv tool install --editable .        # puts `nemlig` and `nemlig-mcp` in ~/.local/bin
 ```
 
-The CLI reads these variables directly (or `~/.config/nemlig/login.json`, which should be `chmod 600`). `-u`/`-p` still work but put the password on the command line, where other local users can see it in `ps`. All HTTP requests use a 5 s connect / 20 s read timeout.
+`--editable` means edits to this checkout take effect without reinstalling; re-run with `--reinstall` after changing dependencies in `pyproject.toml`.
+
+### Credentials
+
+Both the CLI and the MCP server look for credentials in this order (first match wins):
+
+1. `-u` / `-p` options (CLI only; avoid `-p`, the password is visible in `ps`)
+2. `NEMLIG_USER` / `NEMLIG_PASS` environment variables
+3. macOS Keychain item with service `nemlig` — the recommended setup:
+   ```bash
+   security add-generic-password -s nemlig -a your@email.com -w   # prompts for the password
+   ```
+4. `~/.config/nemlig/login.json` (CLI only; should be `chmod 600`)
+
+All HTTP requests use a 5 s connect / 20 s read timeout.
 
 ## Usage
 
@@ -53,10 +68,11 @@ just history                     # Order history
 just history 12345678            # Order details
 ```
 
-Direct execution:
+From any terminal, after the global install:
 
 ```bash
-uv run python nemlig_cli.py search "milk"   # reads NEMLIG_USER / NEMLIG_PASS
+nemlig search "milk"
+nemlig basket
 ```
 
 ## MCP server
@@ -64,10 +80,10 @@ uv run python nemlig_cli.py search "milk"   # reads NEMLIG_USER / NEMLIG_PASS
 `server.py` wraps the client's core functions as an MCP server (stdio transport, [FastMCP](https://github.com/jlowin/fastmcp)), so an AI assistant can search, manage the basket and book delivery slots directly.
 
 ```bash
-NEMLIG_USER=... NEMLIG_PASS=... uv run python server.py
+nemlig-mcp                    # after the global install; or: uv run python server.py
 ```
 
-`fastmcp` is a core dependency (not an extra), so a plain `uv sync` is enough to run the server.
+`fastmcp` is a core dependency, so the install above is all the server needs.
 
 ### Tools
 
@@ -96,37 +112,23 @@ Write tools operate on the account's real basket. Their docstrings say so, so th
 
 ### Registering with an MCP client
 
-Credentials must reach the server as environment variables without landing in a config file. The pattern used here is a small launcher script that pulls the password from the OS keychain (macOS example, gitignored as machine-specific):
-
-```sh
-#!/bin/sh
-# run_server.sh
-export NEMLIG_USER="your@email.com"
-NEMLIG_PASS="$(security find-generic-password -s nemlig -w)" || exit 1
-export NEMLIG_PASS
-exec uv run --directory /path/to/nemlig_cli python server.py
-```
-
-Store the password once with:
+After the global install (see [Install](#install)), `nemlig-mcp` is on `PATH` and finds credentials itself (environment, then Keychain), so nothing secret goes in any config file. Register it per project — run this inside the project folder that should have the tools:
 
 ```bash
-security add-generic-password -a your@email.com -s nemlig -w
+claude mcp add nemlig --scope project -- nemlig-mcp   # writes ./.mcp.json
 ```
 
-Then point the client at the launcher — e.g. in a consuming project's `.mcp.json`:
+which is equivalent to this `.mcp.json` in that folder:
 
 ```json
 {
   "mcpServers": {
-    "nemlig": {
-      "type": "stdio",
-      "command": "/path/to/nemlig_cli/run_server.sh",
-      "args": [],
-      "env": {}
-    }
+    "nemlig": { "type": "stdio", "command": "nemlig-mcp", "args": [] }
   }
 }
 ```
+
+Use `--scope local` instead to keep it out of the project's git (stored privately per folder in `~/.claude.json`).
 
 Note that this repo's own `.mcp.json` configures the **Chrome DevTools** MCP used for API discovery (see the development workflow below) — not this server.
 
@@ -263,7 +265,6 @@ nemlig-cli/
 ├── nemlig_api.md                         # API documentation (built via workflow)
 ├── nemlig_cli.py                         # Python client implementation
 ├── server.py                             # FastMCP server wrapping the client
-├── run_server.sh                         # Launcher w/ keychain credentials (gitignored)
 ├── .env.example                          # Credential template for the CLI/justfile
 ├── justfile                              # Command shortcuts
 ├── pyproject.toml                        # Python project config
